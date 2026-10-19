@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>문서 변환 & PDF 분할 V8</title>
+
+  <!-- 1. 오픈소스 라이브러리 로드 (CDN) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <script src="https://unpkg.com/turndown/dist/turndown.js"></script>
+  <script src="https://unpkg.com/turndown-plugin-gfm/dist/turndown-plugin-gfm.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif; max-width: 980px; margin: 35px auto; padding: 0 20px; line-height: 1.6; color: #333; }
+    .badge { display: inline-block; background: #e8f5e9; color: #2e7d32; padding: 5px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+    h2 { margin-top: 0; margin-bottom: 16px; color: #1a1a1a; }
+
+    .panel {
+      background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px 18px;
+      border-radius: 10px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .panel-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    .panel-group { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 14px; }
+    .panel-title { font-weight: 700; color: #1e293b; font-size: 14px; min-width: 110px; }
+
+    label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer; font-weight: 500; }
+    input[type="checkbox"], input[type="radio"] { width: 16px; height: 16px; cursor: pointer; accent-color: #2563eb; }
+    select, input[type="number"], input[type="text"] {
+      padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; background: #fff;
+    }
+    input[type="number"] { width: 90px; }
+    input[type="text"] { width: 240px; }
+    .status-text { font-size: 13px; color: #2563eb; font-weight: 600; }
+    .hint-text { font-size: 12px; color: #64748b; }
+
+    .upload-box {
+      border: 2px dashed #4a90e2; padding: 32px 20px; text-align: center;
+      border-radius: 12px; background: #f8fbff; cursor: pointer; transition: all 0.2s; margin-top: 15px;
+    }
+    .upload-box:hover, .upload-box.dragover { background: #eef6ff; border-color: #2b6cb0; }
+    .upload-box p { margin: 5px 0; font-size: 16px; }
+    .upload-box .sub-text { font-size: 13px; color: #666; }
+
+    .result-container { margin-top: 22px; display: flex; flex-direction: column; gap: 12px; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+    .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    textarea {
+      width: 100%; height: 430px; padding: 16px;
+      font-family: 'Consolas', 'Monaco', monospace; font-size: 14px; line-height: 1.5;
+      border: 1px solid #d1d5db; border-radius: 8px; resize: vertical; background: #fafafa;
+    }
+    textarea:focus { outline: none; border-color: #4a90e2; background: #fff; }
+
+    button {
+      padding: 9px 15px; background: #4a90e2; color: white;
+      border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px; transition: 0.15s;
+    }
+    button:hover { background: #357abd; }
+    button.secondary { background: #4b5563; }
+    button.secondary:hover { background: #374151; }
+    button.apply-btn { padding: 6px 12px; background: #2563eb; font-size: 13px; }
+    button.zip-btn { background: #059669; display: none; }
+    button.zip-btn:hover { background: #047857; }
+    /* 💡 사용 방법 · 프롬프트 공유 */
+    .header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+    button.tip-btn { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    button.tip-btn:hover { background: #fde68a; }
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+      z-index: 1000; align-items: center; justify-content: center; padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-card {
+      background: #fff; border-radius: 14px; width: 100%; max-width: 680px; max-height: 90vh;
+      overflow-y: auto; padding: 22px 24px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+    }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .modal-head h3 { margin: 0; font-size: 18px; color: #1a1a1a; }
+    button.close-x { background: transparent; color: #64748b; font-size: 20px; padding: 2px 8px; }
+    button.close-x:hover { background: #f1f5f9; color: #334155; }
+    .modal-section { margin-top: 14px; }
+    .modal-section h4 { margin: 0 0 8px; font-size: 15px; color: #1e293b; }
+    .modal-section ol { margin: 0; padding-left: 20px; font-size: 14px; color: #334155; }
+    .modal-section li { margin-bottom: 4px; }
+    .modal-textarea { height: 280px; font-size: 13px; line-height: 1.5; }
+    .modal-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+
+  <div class="header-row">
+    <span class="badge">🔒 100% 브라우저 로컬 처리 (서버 전송 없음) · V8</span>
+    <button type="button" class="tip-btn" onclick="openGuide()">💡 사용 방법 · 프롬프트 공유</button>
+  </div>
+  <h2>📄 마크다운 변환 & PDF 분할기</h2>
+
+  <!-- 1. 상태 표시 (옵션 없음: 자동 처리) -->
+  <div class="panel">
+    <div class="panel-row">
+      <span class="hint-text">PDF → .md 변환은 자동으로 처리됩니다. 전체 페이지를 .md로 만들고, 깨진 기호(⟦…⟧)가 있거나 스캔된 페이지의 이미지만 함께 저장합니다.</span>
+      <span id="ocrStatus" class="status-text">대기 중</span>
+    </div>
+  </div>
+
+  <!-- 2. PDF 전용 분할 및 출력 옵션 패널 -->
+  <div class="panel">
+    <div class="panel-row">
+      <div class="panel-group">
+        <span class="panel-title">📑작업 모드</span>
+        <label>
+          <input type="radio" name="pdfActionMode" value="md" checked onchange="toggleSplitUI(true)" />
+          마크다운(.md)으로 변환
+        </label>
+        <label>
+          <input type="radio" name="pdfActionMode" value="pdf" onchange="toggleSplitUI(true)" />
+          원본 PDF(.pdf) 파일 자체 분할
+        </label>
+      </div>
+    </div>
+
+    <div class="panel-row" id="splitRow" style="display:none; border-top: 1px dashed #e2e8f0; padding-top: 10px;">
+      <div class="panel-group">
+        <span class="panel-title">✂️ 분할 방식 선택</span>
+        <select id="splitMethod" onchange="toggleSplitUI(true)">
+          <option value="none">분할 안 함 (통합 1개 파일)</option>
+          <option value="splitPoints">특정 페이지 번호들을 기준으로 분할 (예: 5, 12, 20)</option>
+          <option value="pages">일정한 페이지 수 간격으로 분할 (예: 10쪽씩)</option>
+          <option value="chapters">챕터(목차/제목)별 자동 분할</option>
+          <option value="ranges">페이지 구간 직접 지정 (예: 1-4, 5-11)</option>
+        </select>
+
+        <span id="splitPointsInputWrap" style="display:none; align-items:center; gap:6px; flex-wrap:wrap;">
+          <input type="text" id="splitPointsInput" placeholder="시작 페이지들 (예: 5, 12, 20)" />
+          <button type="button" class="apply-btn" onclick="reprocessCurrentFile()">🔄 설정 적용</button>
+          <span class="hint-text">👉 입력 시 [1~4쪽], [5~11쪽], [12~19쪽], [20~끝]으로 자동 분할</span>
+        </span>
+
+        <span id="pageCountInputWrap" style="display:none; align-items:center; gap:6px;">
+          <input type="number" id="splitPageCount" value="10" min="1" /> 페이지씩 묶기
+          <button type="button" class="apply-btn" onclick="reprocessCurrentFile()">🔄 설정 적용</button>
+        </span>
+
+        <span id="rangeInputWrap" style="display:none; align-items:center; gap:6px;">
+          <input type="text" id="splitRanges" placeholder="예: 1-5, 6-10, 11-20" />
+          <button type="button" class="apply-btn" onclick="reprocessCurrentFile()">🔄 설정 적용</button>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 파일 업로드 영역 -->
+  <div class="upload-box" id="dropZone" onclick="document.getElementById('fileInput').click()">
+    <p>여기를 클릭하거나 파일을 끌어다 놓으세요 (Drag & Drop, 여러 파일 가능)</p>
+    <p class="sub-text">지원 포맷: <strong>PDF (.pdf)</strong>, <strong>Word (.docx)</strong>, <strong>Excel (.xlsx, .xls)</strong>, <strong>CSV (.csv)</strong>, <strong>이미지 (.png, .jpg)</strong></p>
+    <input type="file" id="fileInput" multiple accept=".docx,.pdf,.xlsx,.xls,.csv,.png,.jpg,.jpeg,.webp" style="display:none" />
+  </div>
+
+  <!-- 4. 결과 확인 및 다운로드 영역 -->
+  <div class="result-container">
+    <div class="toolbar">
+      <strong id="fileNameLabel">변환 결과 미리보기:</strong>
+      <div class="btn-group">
+        <button id="zipDownloadBtn" class="zip-btn" onclick="downloadZip()">📦 결과 전체 다운로드 (.zip)</button>
+        <button onclick="copyMarkdown()">📋 클립보드 복사</button>
+        <button class="secondary" onclick="downloadMarkdown()">💾 통합 .md 다운로드</button>
+      </div>
+    </div>
+    <textarea id="markdownOutput" placeholder="파일을 선택하면 이곳에 변환 결과나 분할 내역이 표시됩니다..."></textarea>
+  </div>
+
+  <!-- 💡 사용 방법 · 프롬프트 공유 모달 -->
+  <div class="modal-overlay" id="guideModal" onclick="if(event.target===this) closeGuide()">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="guideTitle">
+      <div class="modal-head">
+        <h3 id="guideTitle">💡 사용 방법 · 프롬프트 공유</h3>
+        <button type="button" class="close-x" onclick="closeGuide()" aria-label="닫기">✕</button>
+      </div>
+
+      <div class="modal-section">
+        <h4>📘 사용 방법</h4>
+        <ol>
+          <li>상단에서 <strong>작업 모드</strong>(마크다운 변환 / 원본 PDF 분할)를 고릅니다.</li>
+          <li>PDF 분할을 고른 경우 <strong>분할 방식</strong>을 고르고, 필요하면 페이지 번호나 구간을 입력한 뒤 <strong>🔄 설정 적용</strong>을 누릅니다.</li>
+          <li>파일을 클릭하거나 끌어다 놓습니다. 여러 파일을 한 번에 넣을 수 있습니다. 모든 처리는 브라우저 안에서만 이루어집니다.</li>
+          <li>결과는 아래 칸에 표시됩니다. 복사하거나 <strong>.md</strong> 내려받을 수 있습니다.</li>
+          <li>.md파일을 프롬프트와 함께 AI에 첨부하세요.</li>
+        </ol>
+      </div>
+
+      <div class="modal-section">
+        <h4>📝 프롬프트 공유</h4>
+        <p class="hint-text" style="margin:0 0 6px;">아래 프롬프트를 복사해서 쓸 수 있습니다. 필요하면 수정해서 쓰세요.</p>
+        <textarea id="promptShareText" class="modal-textarea">너는 생물학 전문가이자 번역가야.
+첨부한 원문(.md/이미지)의 전체를 한국어로 직역한 pdf파일을 생성해줘.
+
+[내용 규칙]
+1. 원문에 없는 문장·요약·설명·그림 내용을 절대 추가하지 마. 모든 문단·캡션·박스·핵심용어·복습문제·참고문헌을 빠짐없이 번역해.
+2. 그림은 직접 그리거나 설명을 지어내지 마. 제공된 그림 이미지 파일을 그대로 삽입하고, 이미지가 없으면 "[그림 4.x: 원문 이미지 삽입 위치]"만 남겨. 캡션은 원문 그대로 번역해.
+3. 화학식·기호·단위는 원문 그대로 보존해(Na⁺, K⁺, Ca²⁺, V_m, E_Na, 10⁻³, μm², >10⁹ Ω). 기호가 깨져 보이거나 −/≠ 처럼 모호하면 추측하지 말고 해당 위치를 [확인필요]로 표시해.
+4. 전문용어는 첫 등장 시 한국어(English)로 병기하고, 끝까지 일관되게 써.
+5. 문체는 ~다체로 통일해.
+6. 검증이 끝난 후 번역본은 pdf 파일로 만들고, 체크리스트와 검증 목록은 답변으로 출력해줘.
+
+[조판 규칙]
+(기존 1~3번 그대로. 폰트는 한글 바탕체 폰트 사용)
+
+[검증]
+완성 후 원문 대비 누락·추가가 없는지 섹션별 체크리스트로 보고하고, [확인필요] 항목을 목록으로 알려줘.</textarea>
+        <div class="modal-actions">
+          <button type="button" onclick="copySharedPrompt()">📋 프롬프트 복사</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    const turndownService = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
+    turndownService.use(turndownPluginGfm.gfm);
+
+    let currentFileName = 'converted';
+    let ocrWorker = null;
+    let currentZipBlob = null;
+    let currentZipName = '';
+    let lastUploadedFiles = [];
+
+    // ===== 💡 사용 방법 · 프롬프트 공유 =====
+    function openGuide() {
+      document.getElementById('guideModal').classList.add('open');
+    }
+    function closeGuide() {
+      document.getElementById('guideModal').classList.remove('open');
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeGuide();
+    });
+    async function copySharedPrompt() {
+      const text = document.getElementById('promptShareText').value.trim();
+      if (!text) return alert('복사할 문구가 없습니다.');
+      await navigator.clipboard.writeText(text);
+      alert('프롬프트가 클립보드에 복사되었습니다!');
+    }
+
+    // ===== 깨진 기호 보정표 (이 교재 PDF의 글꼴 기준 / 다른 PDF는 다를 수 있음) =====
+    const SYMBOL_MAP = { '\u0003': '+', '\u0004': '=', '\u0008': '×' };
+    const AMBIGUOUS_MARK = '⟦−/≠?⟧';   // \u0002 는 −(빼기)와 ≠ 로 같이 쓰여서 문맥으로 구분 불가
+
+    // UI 옵션 변경 시 입력칸 표시/숨김 처리
+    function toggleSplitUI(shouldReprocess = false) {
+      const actionMode = document.querySelector('input[name="pdfActionMode"]:checked').value;
+      const splitSelect = document.getElementById('splitMethod');
+
+      // PDF 분할 모드에서 '분할 안 함'은 의미가 없으므로 기본 분할 방식으로 바꿈
+      if (actionMode === 'pdf' && splitSelect.value === 'none') {
+        splitSelect.value = 'splitPoints';
+      }
+
+      document.getElementById('splitRow').style.display = (actionMode === 'pdf') ? 'flex' : 'none';
+
+      const method = splitSelect.value;
+      document.getElementById('splitPointsInputWrap').style.display = (method === 'splitPoints') ? 'inline-flex' : 'none';
+      document.getElementById('pageCountInputWrap').style.display = (method === 'pages') ? 'inline-flex' : 'none';
+      document.getElementById('rangeInputWrap').style.display = (method === 'ranges') ? 'inline-flex' : 'none';
+
+      if (shouldReprocess && lastUploadedFiles.length) {
+        handleFiles(lastUploadedFiles);
+      }
+    }
+
+    function reprocessCurrentFile() {
+      if (lastUploadedFiles.length) {
+        handleFiles(lastUploadedFiles);
+      } else {
+        alert('먼저 파일을 선택해 주세요.');
+      }
+    }
+
+    // Tesseract.js OCR 워커 초기화
+    async function getOcrWorker() {
+      const statusEl = document.getElementById('ocrStatus');
+      if (!ocrWorker) {
+        statusEl.textContent = "⏳ OCR 인공지능 모델(한국어+영어) 준비 중...";
+        ocrWorker = await Tesseract.createWorker(['kor', 'eng'], 1, {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              statusEl.textContent = `🔍 글자 읽는 중... (${Math.round(m.progress * 100)}%)`;
+            }
+          }
+        });
+      }
+      return ocrWorker;
+    }
+
+    // 드래그 앤 드롭 이벤트
+    const dropZone = document.getElementById('dropZone');
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+    });
+
+    document.getElementById('fileInput').addEventListener('change', (e) => {
+      if (e.target.files.length) handleFiles(e.target.files);
+    });
+
+    // =====================================================================
+    //  PDF 텍스트 추출 도우미
+    // =====================================================================
+
+    // 줄 안의 첨자 태그 안쪽 공백 제거: <sup>− 3</sup> → <sup>−3</sup>
+    function compactScriptTags(s) {
+      return s.replace(/<(sup|sub)>([\s\S]*?)<\/\1>/g, (m, tag, inner) => `<${tag}>${inner.replace(/\s+/g, '')}</${tag}>`);
+    }
+
+    // 깨진 기호 보정. stats 에 보정/모호/미확인 건수를 누적
+    function fixSymbols(s, stats) {
+      // \u0002 뒤에 숫자가 오면 음수 부호(−) 로 확정 (예: −80, 10⁻³)
+      s = s.replace(/\u0002(?=\s*[0-9])/g, () => { stats.fixed++; return '−'; });
+      // 나머지 \u0002 는 −/≠ 구분 불가 → 표시만 남김 (페이지 이미지로 확인)
+      s = s.replace(/\u0002/g, () => { stats.ambiguous++; return AMBIGUOUS_MARK; });
+      // 확정 가능한 기호
+      s = s.replace(/[\u0003\u0004\u0008]/g, (ch) => { stats.fixed++; return SYMBOL_MAP[ch]; });
+      // "= − 80" → "= −80" (등호/여는 괄호 바로 뒤의 음수 부호만 붙임)
+      s = s.replace(/([=(,]\s*)−\s+(?=[0-9])/g, '$1−');
+      // 그 밖의 제어문자는 지우지 말고 표시
+      s = s.replace(/[\u0000\u0001\u0005-\u0007\u000B-\u001F]/g, (ch) => {
+        stats.unknown++;
+        return `⟦?U+${ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}⟧`;
+      });
+      return s;
+    }
+
+    // ===== 그림 영역 찾기: 이미지와 큰 도형(경로)의 위치를 페이지 연산 목록에서 계산 =====
+    function mulM(p, q) {
+      return [p[0]*q[0]+p[1]*q[2], p[0]*q[1]+p[1]*q[3], p[2]*q[0]+p[3]*q[2], p[2]*q[1]+p[3]*q[3],
+              p[4]*q[0]+p[5]*q[2]+q[4], p[4]*q[1]+p[5]*q[3]+q[5]];
+    }
+    function boxOfM(m, x0, y0, x1, y1) {
+      const pts = [[x0,y0],[x1,y0],[x0,y1],[x1,y1]].map(([x,y]) => [m[0]*x+m[2]*y+m[4], m[1]*x+m[3]*y+m[5]]);
+      const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+      return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    }
+    function mergeBoxes(list, gap) {
+      let arr = list.map(b => b.slice());
+      let changed = true;
+      while (changed) {
+        changed = false;
+        outer: for (let i = 0; i < arr.length; i++) {
+          for (let j = i + 1; j < arr.length; j++) {
+            const a = arr[i], b = arr[j];
+            if (a[0] <= b[2] + gap && b[0] <= a[2] + gap && a[1] <= b[3] + gap && b[1] <= a[3] + gap) {
+              arr[i] = [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])];
+              arr.splice(j, 1);
+              changed = true;
+              break outer;
+            }
+          }
+        }
+      }
+      return arr;
+    }
+    // 그림 영역 = 이미지 또는 충분히 큰 도형 묶음의 사각형 목록 (본문 글자·얇은 줄은 제외)
+    async function detectFigureRegions(page) {
+      const opList = await page.getOperatorList();
+      const OPS = pdfjsLib.OPS;
+      const vp = page.getViewport({ scale: 1 });
+      const pageArea = vp.width * vp.height;
+      let ctm = [1, 0, 0, 1, 0, 0];
+      const stack = [];
+      const boxes = [];
+      for (let i = 0; i < opList.fnArray.length; i++) {
+        const fn = opList.fnArray[i], args = opList.argsArray[i];
+        switch (fn) {
+          case OPS.save: stack.push(ctm); break;
+          case OPS.restore: if (stack.length) ctm = stack.pop(); break;
+          case OPS.transform: ctm = mulM(args, ctm); break;
+          case OPS.paintFormXObjectBegin:
+            stack.push(ctm);
+            if (args && args[0]) ctm = mulM(args[0], ctm);
+            break;
+          case OPS.paintFormXObjectEnd: if (stack.length) ctm = stack.pop(); break;
+          case OPS.paintImageXObject:
+          case OPS.paintInlineImageXObject:
+          case OPS.paintImageXObjectRepeat:
+            boxes.push(boxOfM(ctm, 0, 0, 1, 1));
+            break;
+          case OPS.constructPath:
+            if (args && args[2]) {
+              const mm = args[2];
+              boxes.push(boxOfM(ctm, mm[0], mm[1], mm[2], mm[3]));
+            }
+            break;
+        }
+      }
+      // 너무 작은 조각(얇은 선, 밑줄, 글자 장식)은 버림
+      const big = boxes.filter(b => (b[2] - b[0]) >= 30 && (b[3] - b[1]) >= 30);
+      if (big.length === 0 || big.length > 3000) return [];
+      const merged = mergeBoxes(big, 6)
+        .map(b => [b[0] - 3, b[1] - 3, b[2] + 3, b[3] + 3])
+        .filter(b => (b[2] - b[0]) >= 60 && (b[3] - b[1]) >= 60)
+        .filter(b => (b[2] - b[0]) * (b[3] - b[1]) < pageArea * 0.6);   // 페이지 대부분을 덮는 배경은 제외
+      return merged;
+    }
+
+    // 페이지 한 장에서 줄(line) 단위로 텍스트 추출: 좌표·글자크기로 첨자/줄바꿈/공백 판단
+    async function extractPageLines(page, doFix) {
+      const vp = page.getViewport({ scale: 1 });
+      const tc = await page.getTextContent({ disableCombineTextItems: true });
+      const stats = { fixed: 0, ambiguous: 0, unknown: 0, excluded: 0 };
+      const figRegions = await detectFigureRegions(page);
+      const excluded = [];
+
+      const recs = [];
+      for (const it of tc.items) {
+        if (typeof it.str !== 'string' || it.str.trim() === '') continue;
+        const t = it.transform;
+        const size = Math.hypot(t[2], t[3]) || it.height || 10;
+        recs.push({ str: it.str, x: t[4], y: t[5], w: it.width || 0, size });
+      }
+
+      // 그림 영역 안의 글자(축 눈금, 범례, 그림 속 라벨)는 제외하고 목록만 남김
+      const inFigure = (r) => {
+        const cx = r.x + (r.w || 0) / 2, cy = r.y + r.size * 0.3;
+        return figRegions.some(g => cx >= g[0] && cx <= g[2] && cy >= g[1] && cy <= g[3]);
+      };
+      for (let k = recs.length - 1; k >= 0; k--) {
+        if (inFigure(recs[k])) { excluded.unshift(recs[k].str); stats.excluded++; recs.splice(k, 1); }
+      }
+
+      const hist = {};
+      let chars = 0;
+      for (const r of recs) {
+        const k = Math.round(r.size * 2) / 2;
+        hist[k] = (hist[k] || 0) + r.str.length;
+        chars += r.str.length;
+      }
+
+      const rawLines = [];
+      let cur = null;
+      const closeScript = () => {
+        if (cur && cur.mode !== 'n') {
+          cur.parts.push(cur.mode === 'sup' ? '</sup>' : '</sub>');
+          cur.mode = 'n';
+        }
+      };
+      const finish = () => {
+        if (!cur) return;
+        closeScript();
+        rawLines.push({ text: cur.parts.join(''), x: cur.x, y: cur.baseY, size: cur.baseSize, endX: cur.endX });
+      };
+
+      for (const r of recs) {
+        if (cur) {
+          const dy = r.y - cur.baseY; // PDF 좌표는 위쪽이 +
+          const isScript =
+            r.size < cur.baseSize * 0.88 &&
+            Math.abs(dy) > cur.baseSize * 0.1 &&
+            Math.abs(dy) < cur.baseSize * 0.8 &&
+            r.x >= cur.endX - cur.baseSize * 0.5;
+          if (isScript) {
+            const want = dy > 0 ? 'sup' : 'sub';
+            if (cur.mode !== want) {
+              closeScript();
+              cur.parts.push('<' + want + '>');
+              cur.mode = want;
+            }
+            cur.parts.push(r.str);
+            cur.endX = Math.max(cur.endX, r.x + r.w);
+            continue;
+          }
+          const sameLine = Math.abs(dy) <= cur.baseSize * 0.35 && r.x >= cur.endX - cur.baseSize * 1.5;
+          if (!sameLine) {
+            finish();
+            cur = null;
+          } else {
+            closeScript();
+            const gap = r.x - cur.endX;
+            const last = cur.parts.length ? cur.parts[cur.parts.length - 1] : '';
+            if (gap > cur.baseSize * 0.18 && !/\s$/.test(last) && !/^\s/.test(r.str)) cur.parts.push(' ');
+            cur.parts.push(r.str);
+            cur.endX = r.x + r.w;
+            continue;
+          }
+        }
+        cur = { parts: [r.str], x: r.x, y: r.y, baseY: r.y, baseSize: r.size, endX: r.x + r.w, mode: 'n' };
+      }
+      finish();
+
+      const lines = [];
+      for (const ln of rawLines) {
+        let text = compactScriptTags(ln.text);
+        if (doFix) text = fixSymbols(text, stats);
+        text = text.replace(/[ \t]+/g, ' ').trim();
+        if (!text) continue;
+        // "81 81 81 81 …" 같은 반복 잡음 줄 제거
+        const tokens = text.split(' ');
+        if (tokens.length >= 8 && new Set(tokens).size <= 2) continue;
+        // 출판사 파일명 꼬리말 제거
+        if (/\.indd\b/i.test(text)) continue;
+        lines.push({ text, x: ln.x, y: ln.y, size: ln.size, endX: ln.endX, yFrac: 1 - ln.y / vp.height });
+      }
+      // 이미지 확인이 필요한 페이지인지 판단 (모호/미확인 기호, 또는 보정을 껐을 때 남은 제어문자)
+      const rawControl = rawLines.some(l => /[\u0000-\u0008\u000B-\u001F]/.test(l.text));
+      const flag = stats.ambiguous > 0 || stats.unknown > 0 || (!doFix && rawControl);
+      return { lines, hist, chars, stats, flag, excluded };
+    }
+
+    // 모든 페이지에서 반복되는 머리말/꼬리말(숫자만 다른 줄) 찾기
+    function headerFooterKey(text) {
+      return text.replace(/<\/?su[bp]>/g, '').replace(/\d+/g, '#').trim().slice(0, 60);
+    }
+    function findRepeatedHeaderFooter(pageDataList) {
+      const counts = {};
+      const n = pageDataList.length;
+      pageDataList.forEach(pd => {
+        const sorted = [...pd.lines].sort((a, b) => b.y - a.y);
+        const cands = [...sorted.slice(0, 2), ...sorted.slice(-2)];
+        const seen = new Set();
+        cands.forEach(ln => {
+          const k = headerFooterKey(ln.text);
+          if (k && !seen.has(k)) { seen.add(k); counts[k] = (counts[k] || 0) + 1; }
+        });
+      });
+      const keys = new Set();
+      if (n >= 3) {
+        const th = Math.max(3, n * 0.25);
+        Object.keys(counts).forEach(k => { if (counts[k] >= th) keys.add(k); });
+      }
+      return keys;
+    }
+
+    // 줄들을 문단으로 합치고 큰 글자는 제목(#)으로 변환
+    const HYPHEN_KEEP = new Set(['gated','permeable','dependent','sensitive','selective','activated','inactivated','induced','based','like','specific','blocking','derived','charged','generated','evoked','wide','scale','cation','sodium','potassium']);
+    function linesToMarkdown(lines, bodySize) {
+      const out = [];
+      let para = null, prev = null, lastHeading = null;
+      const flush = () => { if (para) { out.push(para); para = null; } };
+
+      for (const ln of lines) {
+        const t = ln.text;
+        const isHeading = ln.size > bodySize * 1.12 && t.length < 90;
+
+        if (isHeading) {
+          flush();
+          const ratio = ln.size / bodySize;
+          const level = ratio >= 1.6 ? '#' : (ratio >= 1.3 ? '##' : '###');
+          if (lastHeading && lastHeading.level === level && prev && (prev.y - ln.y) > 0 && (prev.y - ln.y) < ln.size * 1.8) {
+            out[lastHeading.idx] += ' ' + t;
+          } else {
+            out.push(`${level} ${t}`);
+            lastHeading = { level, idx: out.length - 1 };
+          }
+          prev = ln;
+          continue;
+        }
+
+        const gap = prev ? prev.y - ln.y : 0;
+        const startsList = /^(\d+\.\s|[•▪–-]\s|\([a-z0-9]\)\s)/i.test(t);
+        const newPara =
+          !para || !prev ||
+          (prev.size > bodySize * 1.12) ||
+          gap < -ln.size * 0.5 ||
+          gap > ln.size * 1.9 ||
+          (ln.x > prev.x + ln.size * 0.8) ||
+          startsList;
+
+        if (newPara) {
+          flush();
+          para = t;
+        } else {
+          const m = para.match(/([A-Za-z]+)-$/);
+          const nextWord = (t.match(/^[a-z]+/) || [''])[0];
+          if (m && nextWord && !HYPHEN_KEEP.has(nextWord)) {
+            para = para.slice(0, -1) + t;       // 줄끝 하이픈으로 끊긴 단어 합치기
+          } else if (m && nextWord) {
+            para = para + t;                     // 복합어 하이픈은 유지
+          } else {
+            para = para + ' ' + t;
+          }
+        }
+        lastHeading = null;
+        prev = ln;
+      }
+      flush();
+      return out.join('\n\n');
+    }
+
+    // 확인 목록: ⟦…⟧ 위치마다 앞뒤 문맥을 뽑아 페이지별로 정리
+    function buildReviewChecklist(scopePages, pageData, ocrTexts, extraPages) {
+      const out = [];
+      scopePages.forEach(p => {
+        const found = [];
+        pageData[p].lines.forEach(ln => {
+          const re = /⟦[^⟧]*⟧/g;
+          let m;
+          while ((m = re.exec(ln.text)) !== null) {
+            const before = ln.text.slice(Math.max(0, m.index - 30), m.index);
+            const after = ln.text.slice(m.index + m[0].length, m.index + m[0].length + 30);
+            found.push(`  - …${before}${m[0]}${after}…`);
+          }
+        });
+        const reasons = [];
+        if (found.length) reasons.push(`확인 필요 기호 ${found.length}곳`);
+        if (ocrTexts[p]) reasons.push('스캔 페이지(OCR)');
+        if (extraPages.has(p)) reasons.push('직접 추가한 페이지');
+        out.push(`- Page ${p}: ${reasons.join(', ') || '확인 대상'}`);
+        found.forEach(f => out.push(f));
+      });
+      return out.join('\n');
+    }
+
+    // 페이지를 PNG 로 렌더링
+    async function renderPageToCanvas(page, scale) {
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      return canvas;
+    }
+    function canvasToBlob(canvas) {
+      return new Promise(res => canvas.toBlob(res, 'image/png'));
+    }
+    function releaseCanvas(canvas) { if (canvas) { canvas.width = 0; canvas.height = 0; } }
+
+    // =====================================================================
+    //  파일 변환 함수들 (파일 1개 → md)
+    // =====================================================================
+    function baseName(file) { return file.name.replace(/\.[^/.]+$/, ""); }
+
+    async function convertDocxToMd(arrayBuffer, ctx) {
+      const useOcr = true;
+      let figureList = [];
+      const options = {
+        convertImage: mammoth.images.imgElement(async function(image) {
+          const figIndex = figureList.length + 1;
+          if (useOcr) {
+            const base64 = await image.read("base64");
+            figureList.push({ index: figIndex, dataUri: `data:${image.contentType};base64,${base64}` });
+          }
+          return { src: `FIGURE_PLACEHOLDER_${figIndex}`, alt: `Figure ${figIndex}` };
+        })
+      };
+      const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer }, options);
+      let markdown = turndownService.turndown(result.value);
+
+      if (useOcr && figureList.length > 0) {
+        const worker = await getOcrWorker();
+        for (const fig of figureList) {
+          ctx.output.value = `⏳ 워드 문서 내 Figure ${fig.index}/${figureList.length} 글자 인식(OCR) 중...`;
+          const { data: { text } } = await worker.recognize(fig.dataUri);
+          const cleanedText = formatOcrText(text);
+          const replacement = cleanedText
+            ? `\n> **[🖼️ Figure ${fig.index} 텍스트 추출]**\n> ${cleanedText}\n`
+            : `\n> *[🖼️ Figure ${fig.index}: 인식된 텍스트 없음]*\n`;
+          markdown = markdown.replace(new RegExp(`!\\[Figure ${fig.index}\\]\\(FIGURE_PLACEHOLDER_${fig.index}\\)`, 'g'), replacement);
+        }
+      } else {
+        markdown = markdown.replace(/!\[Figure (\d+)\]\(FIGURE_PLACEHOLDER_\d+\)/g, '> *[🖼️ Figure $1 이미지]*');
+      }
+      return markdown.trim();
+    }
+
+    async function convertSheetToMd(ext, arrayBuffer, base) {
+      let workbook;
+      if (ext === 'csv') {
+        let text = new TextDecoder('utf-8').decode(arrayBuffer);
+        if (text.includes('\uFFFD')) text = new TextDecoder('euc-kr').decode(arrayBuffer);
+        workbook = XLSX.read(text, { type: 'string' });
+      } else {
+        workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      }
+      let fullMarkdown = `# ${base}\n\n`;
+      workbook.SheetNames.forEach(sheetName => {
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        const mdTable = arrayToMarkdownTable(rows);
+        if (mdTable) {
+          if (workbook.SheetNames.length > 1) fullMarkdown += `## 📊 시트: ${sheetName}\n\n`;
+          fullMarkdown += mdTable + '\n\n';
+        }
+      });
+      return fullMarkdown.trim() || "표로 변환할 데이터가 없습니다.";
+    }
+
+    async function convertImageToMd(file, base, ctx) {
+      const worker = await getOcrWorker();
+      ctx.output.value = "⏳ 이미지 속 글자(한글/영어)를 읽고 있습니다...";
+      const { data: { text } } = await worker.recognize(file);
+      const cleaned = formatOcrText(text);
+      return `# 🖼️ ${base} (OCR 추출)\n\n> ${cleaned || "인식된 텍스트가 없습니다."}`;
+    }
+
+    // PDF 1개 → md 조각들 (+ 확인이 필요한 페이지 이미지)
+    // 이미지 경로는 항상 images/page_NNN.png (md 파일과 같은 폴더 기준)
+    async function convertPdfToMd(file, arrayBuffer, splitMethod, base, ctx) {
+      const { output, statusEl } = ctx;
+      const useOcr = true;      // 텍스트가 거의 없는 스캔 페이지만 OCR
+      const imageScale = 2;     // 이미지 해상도 2배 고정
+      const doFix = true;       // 깨진 기호 자동 보정
+
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+      const totalPages = pdf.numPages;
+      const chunks = await getPdfSplitChunks(pdf, splitMethod, base);
+
+      const pageData = {}, imageBlobs = {}, ocrTexts = {}, sizeHist = {};
+      const stats = { fixed: 0, ambiguous: 0, unknown: 0, excluded: 0 };
+
+      for (let i = 1; i <= totalPages; i++) {
+        statusEl.textContent = `📄 ${file.name} 처리 중 (${i}/${totalPages}쪽)...`;
+        const page = await pdf.getPage(i);
+        const ex = await extractPageLines(page, doFix);
+        pageData[i] = ex;
+        stats.fixed += ex.stats.fixed;
+        stats.ambiguous += ex.stats.ambiguous;
+        stats.unknown += ex.stats.unknown;
+        stats.excluded += ex.stats.excluded;
+        Object.keys(ex.hist).forEach(k => { sizeHist[k] = (sizeHist[k] || 0) + ex.hist[k]; });
+
+        let canvas = null;
+        const needOcr = useOcr && ex.chars < 30;
+        if (needOcr) {
+          output.value = `⏳ ${file.name} ${i}페이지는 텍스트가 거의 없어 OCR 인식 중...`;
+          if (!canvas) canvas = await renderPageToCanvas(page, 2);   // 스캔 페이지는 텍스트만 OCR (이미지는 저장하지 않음)
+          const worker = await getOcrWorker();
+          const { data: { text } } = await worker.recognize(canvas);
+          const ocrCleaned = formatOcrText(text);
+          if (ocrCleaned) ocrTexts[i] = ocrCleaned;
+        }
+        releaseCanvas(canvas);
+      }
+
+      let bodySize = 10, bestCount = -1;
+      Object.keys(sizeHist).forEach(k => { if (sizeHist[k] > bestCount) { bestCount = sizeHist[k]; bodySize = parseFloat(k); } });
+      const hfKeys = findRepeatedHeaderFooter(Object.values(pageData));
+
+      const pad = (n) => String(n).padStart(3, '0');
+      const imgPath = (i) => `images/page_${pad(i)}.png`;
+      const pageMarkdowns = {};
+      for (let i = 1; i <= totalPages; i++) {
+        const lines = pageData[i].lines.filter(ln => {
+          const inEdge = ln.yFrac < 0.12 || ln.yFrac > 0.88;
+          return !(inEdge && hfKeys.has(headerFooterKey(ln.text)));
+        });
+        let body = linesToMarkdown(lines, bodySize);
+        if (ocrTexts[i]) body += `\n\n> **[🖼️ Page ${i} 스캔본 OCR 추출]**\n> ${ocrTexts[i]}`;
+        let head = `## Page ${i} (PDF ${i}쪽)\n\n`;
+        const flagCount = pageData[i].stats.ambiguous + pageData[i].stats.unknown;
+        if (flagCount > 0) head += `> ⚠️ 이 페이지에 확인이 필요한 기호(⟦…⟧)가 ${flagCount}곳 있습니다. 원본과 대조해서 확인하세요.\n\n`;
+        const exList = pageData[i].excluded || [];
+        if (exList.length) head += `> 🗂 그림 영역에서 제외한 글자 ${exList.length}개 (원본과 대조용): ${exList.join(' · ')}\n\n`;
+        pageMarkdowns[i] = `${head}${body}\n\n---\n\n`;
+      }
+
+      const imagePageNums = [];   // 그림 이미지는 출력하지 않음
+      const flaggedPages = Object.keys(pageData).map(Number).filter(p => pageData[p].flag || ocrTexts[p]).sort((a, b) => a - b);
+      const noteLines = [
+        `> 변환 메모: 위/아래 첨자는 <sub> <sup> 태그로 표시했습니다. 예) Na<sup>+</sup>, V<sub>m</sub>`,
+        `> 변환 메모: ⟦…⟧ 표시는 글꼴 문제로 기호가 깨진 곳입니다. 추측하지 말고 원본과 대조해서 확인하세요.`,
+        `> 변환 메모: 그림은 포함하지 않았습니다. 그림 아래 설명(캡션)만 텍스트로 옮겼습니다.`
+      ].join('\n');
+
+      const makeText = (title, start, end) => {
+        let md = `# ${title}\n\n${noteLines}\n\n`;
+        const flaggedInRange = flaggedPages.filter(p => p >= start && p <= end);
+        if (flaggedInRange.length) {
+          md += `## 확인 목록 (⟦…⟧ 또는 OCR 페이지)\n\n${buildReviewChecklist(flaggedInRange, pageData, ocrTexts, new Set())}\n\n---\n\n`;
+        }
+        for (let p = start; p <= end; p++) md += pageMarkdowns[p];
+        return md.trim();
+      };
+
+      let parts;
+      if (splitMethod === 'none') {
+        parts = [{ name: `${base}.md`, text: makeText(`${base} (Page 1~${totalPages})`, 1, totalPages) }];
+      } else {
+        parts = chunks.map((ch, idx) => ({
+          name: `${String(idx + 1).padStart(2, '0')}_${sanitizeFileName(ch.title)}_(p${ch.start}-${ch.end}).md`,
+          text: makeText(`${ch.title} (Page ${ch.start}~${ch.end})`, ch.start, ch.end)
+        }));
+      }
+      return { parts, images: [], stats, imagePageNums, totalPages };
+    }
+
+    // =====================================================================
+    //  메인 처리 함수 (첨부한 파일 여러 개 처리)
+    // =====================================================================
+    async function handleFiles(fileList) {
+      const files = Array.from(fileList);
+      lastUploadedFiles = files;
+      const output = document.getElementById('markdownOutput');
+      const label = document.getElementById('fileNameLabel');
+      const statusEl = document.getElementById('ocrStatus');
+      const zipBtn = document.getElementById('zipDownloadBtn');
+      const ctx = { output, statusEl };
+
+      zipBtn.style.display = 'none';
+      currentZipBlob = null;
+
+      const actionMode = document.querySelector('input[name="pdfActionMode"]:checked').value;
+      // 분할 방식은 PDF 추출 모드에서만 사용. md 변환은 파일당 md 1개
+      const splitMethod = (actionMode === 'pdf') ? document.getElementById('splitMethod').value : 'none';
+
+      currentFileName = files.length === 1 ? baseName(files[0]) : `통합_${files.length}개_파일`;
+      label.textContent = files.length === 1 ? `작업 결과 (${files[0].name}):` : `작업 결과 (파일 ${files.length}개):`;
+      output.value = "⏳ 파일을 분석하고 작업을 진행 중입니다...";
+      statusEl.textContent = "분석 중...";
+
+      // 파일마다 겹치지 않는 이름 만들기
+      const usedBases = new Set();
+      const safeBases = files.map(f => {
+        let s = sanitizeFileName(baseName(f)), k = 2;
+        const origin = s;
+        while (usedBases.has(s)) { s = `${origin}_${k++}`; }
+        usedBases.add(s);
+        return s;
+      });
+
+      try {
+        // ===== 원본 PDF 파일 자체 분할 =====
+        if (actionMode === 'pdf') {
+          const zip = new JSZip();
+          let summaryLog = `# ✂️ 원본 PDF 분할 완료\n\n`;
+          let totalOut = 0, done = 0;
+
+          for (let fi = 0; fi < files.length; fi++) {
+            const file = files[fi];
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+              summaryLog += `- ⚠️ ${file.name}: PDF가 아니어서 건너뜀\n`;
+              continue;
+            }
+            statusEl.textContent = `✂️ (${fi + 1}/${files.length}) ${file.name} 분할 중...`;
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+            const chunks = await getPdfSplitChunks(pdf, splitMethod, baseName(file));
+            const srcPdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+            summaryLog += `### 📄 ${file.name} (총 ${pdf.numPages}페이지 → ${chunks.length}개)\n`;
+
+            for (let idx = 0; idx < chunks.length; idx++) {
+              const ch = chunks[idx];
+              const newPdf = await PDFLib.PDFDocument.create();
+              const pageIndices = [];
+              for (let p = ch.start; p <= ch.end; p++) pageIndices.push(p - 1);
+              const copiedPages = await newPdf.copyPages(srcPdfDoc, pageIndices);
+              copiedPages.forEach(cp => newPdf.addPage(cp));
+
+              const pdfBytes = await newPdf.save();
+              const fileName = `${String(idx + 1).padStart(2, '0')}_${sanitizeFileName(ch.title)}_(p${ch.start}-${ch.end}).pdf`;
+              zip.file(files.length > 1 ? `${safeBases[fi]}/${fileName}` : fileName, pdfBytes);
+              summaryLog += `- 📄 **${fileName}** (${ch.start}쪽 ~ ${ch.end}쪽, 총 ${ch.end - ch.start + 1}페이지)\n`;
+              totalOut++;
+            }
+            summaryLog += `\n`;
+            done++;
+          }
+
+          if (totalOut === 0) {
+            output.value = "분할할 PDF 파일이 없습니다.";
+            statusEl.textContent = "⚠️ PDF 없음";
+            return;
+          }
+          currentZipBlob = await zip.generateAsync({ type: 'blob' });
+          currentZipName = files.length === 1 ? `${currentFileName}_PDF분할_${totalOut}개.zip` : `PDF분할_${done}개_파일_${totalOut}개.zip`;
+          zipBtn.textContent = `📦 분할된 PDF 다운로드 (${totalOut}개 .zip)`;
+          zipBtn.style.display = 'inline-block';
+          output.value = summaryLog.trim();
+          statusEl.textContent = "✅ 완료!";
+          return;
+        }
+
+        // ===== 마크다운 변환 =====
+        // 분할 방식은 PDF에만 적용. 파일 1개면 그대로, 여러 개면 파일마다 자기 폴더(md + images/)로 묶음
+        const results = [];
+        const totalStats = { fixed: 0, ambiguous: 0, unknown: 0, excluded: 0 };
+        let hasPdf = false;
+
+        for (let fi = 0; fi < files.length; fi++) {
+          const file = files[fi];
+          const ext = file.name.split('.').pop().toLowerCase();
+          const base = baseName(file);
+          statusEl.textContent = `(${fi + 1}/${files.length}) ${file.name} 변환 중...`;
+          const arrayBuffer = await file.arrayBuffer();
+          let r;
+
+          if (ext === 'pdf') {
+            hasPdf = true;
+            r = await convertPdfToMd(file, arrayBuffer, splitMethod, base, ctx);
+            totalStats.fixed += r.stats.fixed;
+            totalStats.ambiguous += r.stats.ambiguous;
+            totalStats.unknown += r.stats.unknown;
+            totalStats.excluded += r.stats.excluded;
+          } else {
+            let text;
+            if (ext === 'docx') text = await convertDocxToMd(arrayBuffer, ctx);
+            else if (['xlsx', 'xls', 'csv'].includes(ext)) text = await convertSheetToMd(ext, arrayBuffer, base);
+            else if (['png', 'jpg', 'jpeg', 'webp', 'bmp'].includes(ext)) text = await convertImageToMd(file, base, ctx);
+            else text = `# ${base}\n\n지원하지 않는 파일 형식입니다.`;
+            r = { parts: [{ name: `${base}.md`, text }], images: [], imagePageNums: [] };
+          }
+          r.folder = files.length > 1 ? `${safeBases[fi]}/` : '';
+          r.file = file;
+          results.push(r);
+        }
+
+        // 출력 조립: 파일마다 md 이름 충돌만 피하고, 여러 파일이면 폴더로 구분
+        const parts = [];
+        const allImages = [];
+        results.forEach(r => {
+          r.parts.forEach(pt => parts.push({ name: r.folder + pt.name, text: pt.text }));
+          r.images.forEach(im => allImages.push({ path: r.folder + im.path, blob: im.blob }));
+        });
+
+        const statSummary = hasPdf
+          ? `기호 보정 ${totalStats.fixed}건 / 모호(⟦−/≠?⟧) ${totalStats.ambiguous}건 / 미확인 ${totalStats.unknown}건 / 그림 영역 제외 ${totalStats.excluded}건`
+          : '';
+
+        if (allImages.length === 0 && parts.length === 1) {
+          output.value = parts[0].text;
+        } else {
+          const zip = new JSZip();
+          parts.forEach(pt => zip.file(pt.name, pt.text));
+          allImages.forEach(im => zip.file(im.path, im.blob));
+
+          let preview = `# 📦 변환 완료 (md ${parts.length}개)\n`;
+          if (statSummary) preview += `> ${statSummary}\n`;
+          results.forEach(r => {
+            if (r.imagePageNums && r.imagePageNums.length) preview += `> 이미지 포함 페이지 (${r.file.name}): ${r.imagePageNums.join(', ')}\n`;
+          });
+          preview += `> 우측 상단의 **[📦 결과 전체 다운로드 (.zip)]** 버튼으로 받을 수 있습니다.\n\n`;
+          parts.forEach((pt, idx) => { preview += `---\n# 📂 파일 ${idx + 1}: ${pt.name}\n\n${pt.text}\n\n`; });
+
+          statusEl.textContent = "📦 ZIP 생성 중...";
+          currentZipBlob = await zip.generateAsync({ type: 'blob' });
+          currentZipName = `${currentFileName}_변환결과.zip`;
+          zipBtn.textContent = `📦 결과 전체 다운로드 (md ${parts.length}개 .zip)`;
+          zipBtn.style.display = 'inline-block';
+          output.value = preview.trim();
+        }
+        statusEl.textContent = statSummary ? `✅ 완료! (${statSummary})` : "✅ 완료!";
+      } catch (error) {
+        output.value = "❌ 처리 중 오류가 발생했습니다: " + error.message;
+        statusEl.textContent = "❌ 오류 발생";
+      }
+    }
+
+    // 큰 글자 + 챕터 표지 패턴인 줄만 챕터 시작으로 인정 (머리글 "CHAPTER 4 …" 오탐 방지)
+    const CHAPTER_LABEL = /^(제\s*\d+\s*[장편부]|chapter\s+[a-z0-9]+|part\s+\d+)$/i;
+    function detectChapterTitle(tc) {
+      const items = tc.items
+        .map(it => ({ str: it.str.trim(), size: Math.hypot(it.transform[2], it.transform[3]) || it.height || 10 }))
+        .filter(it => it.str);
+      if (items.length < 2) return null;
+      const sizes = items.map(it => it.size).sort((a, b) => a - b);
+      const median = sizes[Math.floor(sizes.length / 2)];
+      const head = items.slice(0, 8);
+      for (let k = 0; k < head.length; k++) {
+        const it = head[k];
+        if (it.size >= median * 1.4 && CHAPTER_LABEL.test(it.str)) {
+          const next = head[k + 1];
+          const sub = (next && next.size >= median * 1.4 && next.str.length < 60) ? ' ' + next.str : '';
+          return (it.str + sub).trim();
+        }
+      }
+      return null;
+    }
+
+    // PDF 분할 구간(시작~끝 페이지 및 제목)을 계산
+    async function getPdfSplitChunks(pdf, method, base) {
+      const total = pdf.numPages;
+
+      if (method === 'none') {
+        return [{ title: base, start: 1, end: total }];
+      }
+
+      if (method === 'splitPoints') {
+        const raw = document.getElementById('splitPointsInput').value.trim();
+        const nums = raw.split(/[\s,]+/)
+          .map(n => parseInt(n, 10))
+          .filter(n => !isNaN(n) && n >= 1 && n <= total);
+
+        const startPages = Array.from(new Set([1, ...nums])).sort((a, b) => a - b);
+
+        const chunks = [];
+        for (let i = 0; i < startPages.length; i++) {
+          const start = startPages[i];
+          const end = (i + 1 < startPages.length) ? startPages[i + 1] - 1 : total;
+          if (start <= end) chunks.push({ title: `Part_${chunks.length + 1}`, start, end });
+        }
+        return chunks.length > 0 ? chunks : [{ title: base, start: 1, end: total }];
+      }
+
+      if (method === 'pages') {
+        const step = Math.max(1, parseInt(document.getElementById('splitPageCount').value) || 10);
+        const chunks = [];
+        for (let start = 1; start <= total; start += step) {
+          const end = Math.min(total, start + step - 1);
+          chunks.push({ title: `Part_${chunks.length + 1}`, start, end });
+        }
+        return chunks;
+      }
+
+      if (method === 'ranges') {
+        const raw = document.getElementById('splitRanges').value.trim();
+        const chunks = [];
+        if (raw) {
+          const parts = raw.split(',');
+          parts.forEach((part, idx) => {
+            const m = part.trim().match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+            if (m) {
+              let s = Math.max(1, Math.min(total, parseInt(m[1])));
+              let e = m[2] ? Math.max(1, Math.min(total, parseInt(m[2]))) : s;
+              if (s > e) [s, e] = [e, s];
+              chunks.push({ title: `구간_${idx + 1}`, start: s, end: e });
+            }
+          });
+        }
+        return chunks.length > 0 ? chunks : [{ title: base, start: 1, end: total }];
+      }
+
+      if (method === 'chapters') {
+        let starts = [];
+
+        const outline = await pdf.getOutline();
+        if (outline && outline.length > 0) {
+          for (const item of outline) {
+            try {
+              let dest = item.dest;
+              if (typeof dest === 'string') dest = await pdf.getDestination(dest);
+              if (Array.isArray(dest) && dest[0]) {
+                const pageIndex = await pdf.getPageIndex(dest[0]);
+                starts.push({ title: item.title.trim() || `Chapter`, page: pageIndex + 1 });
+              }
+            } catch (e) {}
+          }
+        }
+
+        if (starts.length === 0) {
+          for (let i = 1; i <= total; i++) {
+            const page = await pdf.getPage(i);
+            const tc = await page.getTextContent();
+            const title = detectChapterTitle(tc);
+            if (title) starts.push({ title, page: i });
+          }
+        }
+
+        starts.sort((a, b) => a.page - b.page);
+        const uniqueStarts = [];
+        starts.forEach(s => {
+          if (!uniqueStarts.some(u => u.page === s.page)) uniqueStarts.push(s);
+        });
+
+        if (uniqueStarts.length === 0) {
+          const fallbackChunks = [];
+          for (let s = 1; s <= total; s += 10) {
+            fallbackChunks.push({ title: `분할_${fallbackChunks.length + 1}`, start: s, end: Math.min(total, s + 9) });
+          }
+          return fallbackChunks;
+        }
+
+        if (uniqueStarts[0].page > 1) {
+          uniqueStarts.unshift({ title: '00_표지_및_서문', page: 1 });
+        }
+
+        const chunks = [];
+        for (let i = 0; i < uniqueStarts.length; i++) {
+          const startPage = uniqueStarts[i].page;
+          const endPage = (i + 1 < uniqueStarts.length) ? uniqueStarts[i + 1].page - 1 : total;
+          if (startPage <= endPage) chunks.push({ title: uniqueStarts[i].title, start: startPage, end: endPage });
+        }
+        return chunks;
+      }
+
+      return [{ title: base, start: 1, end: total }];
+    }
+
+    function sanitizeFileName(name) {
+      return String(name).replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_').slice(0, 35) || 'section';
+    }
+
+    function formatOcrText(rawText) {
+      if (!rawText) return '';
+      return rawText.split('\n').map(line => line.trim()).filter(line => line.length > 0).join('\n> ');
+    }
+
+    function arrayToMarkdownTable(rows) {
+      const nonEmptyRows = rows.filter(row => row.some(cell => String(cell).trim() !== ''));
+      if (nonEmptyRows.length === 0) return '';
+      const maxCols = Math.max(...nonEmptyRows.map(row => row.length));
+      if (maxCols === 0) return '';
+
+      const cleanCell = (val) => {
+        if (val === null || val === undefined) return '';
+        return String(val).trim().replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
+      };
+
+      const headerRow = [];
+      for (let c = 0; c < maxCols; c++) headerRow.push(cleanCell(nonEmptyRows[0][c]) || `열 ${c + 1}`);
+      const separatorRow = Array(maxCols).fill('---');
+
+      let md = `| ${headerRow.join(' | ')} |\n| ${separatorRow.join(' | ')} |\n`;
+      for (let r = 1; r < nonEmptyRows.length; r++) {
+        const dataRow = [];
+        for (let c = 0; c < maxCols; c++) dataRow.push(cleanCell(nonEmptyRows[r][c]));
+        md += `| ${dataRow.join(' | ')} |\n`;
+      }
+      return md.trim();
+    }
+
+    function downloadZip() {
+      if (!currentZipBlob) return alert('다운로드할 파일이 없습니다.');
+      const url = URL.createObjectURL(currentZipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = currentZipName;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    async function copyMarkdown() {
+      const output = document.getElementById('markdownOutput');
+      if (!output.value) return alert('복사할 내용이 없습니다.');
+      await navigator.clipboard.writeText(output.value);
+      alert('텍스트가 클립보드에 복사되었습니다!');
+    }
+
+    function downloadMarkdown() {
+      const content = document.getElementById('markdownOutput').value;
+      if (!content) return alert('다운로드할 내용이 없습니다.');
+      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${currentFileName}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    toggleSplitUI(false);
+  </script>
+</body>
+</html>
